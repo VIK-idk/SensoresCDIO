@@ -1,0 +1,162 @@
+#include <Wire.h>
+#include <Adafruit_ADS1X15.h>
+#include <ESP8266WiFi.h>
+
+Adafruit_ADS1115 ads;
+
+// Pines para los LEDs de humedad
+const int ledMid = 0;   // LED para 33% - 66%
+const int ledHigh = 4;  // LED para 66% - 100%
+
+// Variables globales para calibración de humedad
+int16_t humedadCrudoSeco;   // Valor en seco
+int16_t humedadCrudoMojado; // Valor en mojado
+
+// Configuración Wi-Fi y servidor
+const char WiFiSSID[] = "iClone de Joan";
+const char WiFiPSK[] = "123qweasd";
+const char Server_Host[] = "dweet.io";
+const int Server_HttpPort = 80;
+const String MyWriteAPIKey = "cdiocurso2024g06"; // Canal de Dweet.io
+WiFiClient client;
+
+// Pines para sensor de salinidad
+#define power_pin 5
+
+// Puntos para el polinomio de Lagrange
+const int numPoints = 5; 
+float valorDigital[numPoints] = {462, 840, 860, 900, 930}; 
+float gramosSal[numPoints] = {0, 5, 10, 15, 20};         
+
+void connectWiFi() {
+  Serial.print("Conectando a WiFi");
+  WiFi.begin(WiFiSSID, WiFiPSK);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nWiFi conectado");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void enviarDatosNube(int humedadPorcentaje, float salinidad) {
+  if (client.connect(Server_Host, Server_HttpPort)) {
+    String PostData = "GET /dweet/for/" + MyWriteAPIKey + "?humedad=" + String(humedadPorcentaje) + "&salinidad=" + String(salinidad);
+    client.print(PostData);
+    client.println(" HTTP/1.1");
+    client.println("Host: " + String(Server_Host));
+    client.println("Connection: close");
+    client.println();
+    Serial.println("Datos enviados a la nube:");
+    Serial.println(PostData);
+    while (client.available()) {
+      String line = client.readStringUntil('\r');
+      Serial.print(line);
+    }
+    client.stop();
+  } else {
+    Serial.println("Error conectando al servidor");
+  }
+}
+
+void calibrarSensorHumedad() {
+  Serial.println("SECA EL SENSOR TOTALMENTE");
+  delay(5000);
+  Serial.println("LEYENDO VALOR EN SECO...");
+  humedadCrudoSeco = ads.readADC_SingleEnded(0);
+  Serial.print("Valor seco: ");
+  Serial.println(humedadCrudoSeco);
+
+  Serial.println("PON EL SENSOR EN EL AGUA HASTA LA LÍNEA");
+  delay(5000);
+  Serial.println("LEYENDO VALOR EN MOJADO...");
+  humedadCrudoMojado = ads.readADC_SingleEnded(0);
+  Serial.print("Valor mojado: ");
+  Serial.println(humedadCrudoMojado);
+
+  if (humedadCrudoSeco <= humedadCrudoMojado) {
+    Serial.println("Error en la calibración. Asegúrate de que el sensor esté bien colocado.");
+    while (1);
+  }
+
+  Serial.println("Calibración completada. Iniciando lectura...");
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  if (!ads.begin()) {
+    Serial.println("No se encontró el ADS1115. Verifica la conexión.");
+    while (1);
+  }
+  ads.setGain(GAIN_ONE);
+  Serial.println("ADS1115 iniciado correctamente.");
+
+  pinMode(ledMid, OUTPUT);
+  pinMode(ledHigh, OUTPUT);
+  pinMode(power_pin, OUTPUT);
+
+  digitalWrite(ledMid, LOW);
+  digitalWrite(ledHigh, LOW);
+
+  connectWiFi();
+  calibrarSensorHumedad();
+}
+
+float calcularSalinidad(int adc0) {
+  float salinidad = 0.0;
+
+  for (int i = 0; i < numPoints; i++) {
+    float Li = 1.0;
+    for (int j = 0; j < numPoints; j++) {
+      if (j != i) {
+        Li *= (adc0 - valorDigital[j]) / (valorDigital[i] - valorDigital[j]);
+      }
+    }
+    salinidad += gramosSal[i] * Li;
+  }
+
+  if (adc0 < valorDigital[0]) {
+    salinidad = 0.0;
+  }
+
+  return salinidad;
+}
+
+void loop() {
+  int16_t humedadCrudo = ads.readADC_SingleEnded(0);
+  int humedadPorcentaje = map(humedadCrudo, humedadCrudoMojado, humedadCrudoSeco, 100, 0);
+  humedadPorcentaje = constrain(humedadPorcentaje, 0, 100);
+
+  Serial.print("Valor crudo del ADC: ");
+  Serial.print(humedadCrudo);
+  Serial.print(" -> Humedad: ");
+  Serial.print(humedadPorcentaje);
+  Serial.println("%");
+
+  if (humedadPorcentaje <= 50) {
+    digitalWrite(ledMid, HIGH);
+    digitalWrite(ledHigh, LOW);
+  } else {
+    digitalWrite(ledMid, LOW);
+    digitalWrite(ledHigh, HIGH);
+  }
+
+  int16_t adc0;
+  digitalWrite(power_pin, HIGH);
+  delay(100);
+  adc0 = analogRead(A0);
+  digitalWrite(power_pin, LOW);
+  delay(100);
+
+  float salinidad = calcularSalinidad(adc0);
+
+  Serial.print("Valor digital de salinidad = ");
+  Serial.println(adc0);
+  Serial.print("Salinidad en gramos = ");
+  Serial.println(salinidad);
+
+  enviarDatosNube(humedadPorcentaje, salinidad);
+  delay(1000);
+}
