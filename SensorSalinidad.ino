@@ -1,7 +1,7 @@
 #define power_pin 5 
 
 const int numPoints = 5; 
-float valorDigital[numPoints] = {462, 530, 620, 667, 678}; 
+float valorDigital[numPoints] = {462, 840, 860, 900, 930}; 
 float gramosSal[numPoints] = {0, 5, 10, 15, 20 };         
 
 void setup() {
