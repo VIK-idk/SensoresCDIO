@@ -1,14 +1,15 @@
 #include <Wire.h>
 #include <Adafruit_ADS1X15.h>
 #include <ESP8266WiFi.h>
+
 Adafruit_ADS1115 ads;
-// Pines para los LEDs
-const int ledLow = 5;   // LED para 0% - 33% (A1)
+
+// Pines para los LEDs de humedad
+const int ledLow = 14;   // LED para 0% - 33% (A1)
 const int ledMid = 0;   // LED para 33% - 66% (A2)
 const int ledHigh = 4;  // LED para 66% - 100% (A3)
- //Pin para sensor salinidad
 
-// Variables globales para calibración
+// Variables globales para calibración de humedad
 int16_t humedadCrudoSeco;   // Valor en seco
 int16_t humedadCrudoMojado; // Valor en mojado
 
@@ -20,19 +21,20 @@ const int Server_HttpPort = 80;
 const String MyWriteAPIKey = "cdiocurso2024g06"; // Canal de Dweet.io
 WiFiClient client;
 
-#define power_pin 15 
-const int sal = 5; 
-float valorDigital[sal] = {462, 530, 620, 720, 960}; 
-float gramosSal[sal] = {0, 5, 10, 15, 20 };         
+// Pines para sensor de salinidad
+#define power_pin 5 // Pin para alimentar el sensor de salinidad
 
-int choice; // Variable para la selección del sensor
+// Definir los coeficientes del polinomio de Lagrange para salinidad
+float a =  769.0 / 1130976000.0; // Coeficiente para x^4
+float b = -222379.0 / 125664000.0; // Coeficiente para x^3
+float c = 194295151.0 / 113097600.0; // Coeficiente para x^2
+float d = -231396623.0 / 314160.0; // Coeficiente para x
+float e = 4747356355.0 / 40392.0; // Término independiente
 
 void connectWiFi() {
-  byte ledStatus = LOW;
   Serial.print("Conectando a WiFi");
   WiFi.begin(WiFiSSID, WiFiPSK);
   while (WiFi.status() != WL_CONNECTED) {
-    // Mostrar progreso de conexión
     Serial.print(".");
     delay(500);
   }
@@ -51,7 +53,6 @@ void enviarDatosNube(int humedadPorcentaje, float salinidad) {
     client.println();
     Serial.println("Datos enviados a la nube:");
     Serial.println(PostData);
-    // Leer respuesta del servidor
     while (client.available()) {
       String line = client.readStringUntil('\r');
       Serial.print(line);
@@ -65,138 +66,91 @@ void enviarDatosNube(int humedadPorcentaje, float salinidad) {
 void setup() {
   Serial.begin(9600);
 
-  // Selección del sensor
-  Serial.println("Seleccione el sensor a utilizar:");
-  Serial.println("1. Sensor de Humedad");
-  Serial.println("2. Sensor de Salinidad");
-  while (Serial.available() == 0) {}  // Esperar entrada
-  choice = Serial.parseInt();
-
   // Configuración del ADS1115
   if (!ads.begin()) {
     Serial.println("No se encontró el ADS1115. Verifica la conexión.");
     while (1);
   }
-  ads.setGain(GAIN_ONE); // Configuramos el rango de entrada a ±4.096V
+  ads.setGain(GAIN_ONE);
   Serial.println("ADS1115 iniciado correctamente.");
 
-  // Configurar pines de los LEDs como salida
   pinMode(ledLow, OUTPUT);
   pinMode(ledMid, OUTPUT);
   pinMode(ledHigh, OUTPUT);
+  
   pinMode(power_pin, OUTPUT);
 
-  // Asegurarnos de que los LEDs estén apagados al inicio
   digitalWrite(ledLow, LOW);
   digitalWrite(ledMid, LOW);
   digitalWrite(ledHigh, LOW);
 
-  // Conectar a Wi-Fi
   connectWiFi();
 
-  if (choice == 1) {
-    // Calibración del sensor de humedad
-    delay(5000);
-    Serial.println("SECA EL SENSOR TOTALMENTE");
-    delay(5000);
-    Serial.println("LEYENDO VALOR EN SECO...");
-    humedadCrudoSeco = ads.readADC_SingleEnded(0);
-    Serial.print("Valor seco: ");
-    Serial.println(humedadCrudoSeco);
+  delay(5000);
+  Serial.println("SECA EL SENSOR DE HUMEDAD TOTALMENTE");
+  delay(5000);
+  Serial.println("LEYENDO VALOR EN SECO...");
+  humedadCrudoSeco = ads.readADC_SingleEnded(0);
+  Serial.print("Valor seco: ");
+  Serial.println(humedadCrudoSeco);
 
-    Serial.println("PON EL SENSOR EN EL AGUA HASTA LA LÍNEA");
-    delay(5000);
-    Serial.println("LEYENDO VALOR EN MOJADO...");
-    humedadCrudoMojado = ads.readADC_SingleEnded(0);
-    Serial.print("Valor mojado: ");
-    Serial.println(humedadCrudoMojado);
+  Serial.println("PON EL SENSOR DE HUMEDAD EN EL AGUA HASTA LA LÍNEA");
+  delay(5000);
+  Serial.println("LEYENDO VALOR EN MOJADO...");
+  humedadCrudoMojado = ads.readADC_SingleEnded(0);
+  Serial.print("Valor mojado: ");
+  Serial.println(humedadCrudoMojado);
 
-    // Verificar si la calibración tiene sentido
-    if (humedadCrudoSeco <= humedadCrudoMojado) {
-      Serial.println("Error en la calibración. Asegúrate de que el sensor esté bien colocado.");
-      while (1);
-    }
-
-    Serial.println("Calibración completada. Iniciando lectura...");
+  if (humedadCrudoSeco <= humedadCrudoMojado) {
+    Serial.println("Error en la calibración. Asegúrate de que el sensor esté bien colocado.");
+    while (1);
   }
 
-}
-
-float calcularSalinidad(int adc0){
-  float salinidad=0.0;
-
-  for (int i=0; i<sal; i++) {
-   float Li = 1.0;
-   for (int j=0; j<sal; j++) {
-     if (j != i) {
-      Li *= (adc0- valorDigital[j]) / (valorDigital[i] - valorDigital[j]);   //Lagrange
-      }
-    }
-    salinidad += gramosSal[i] * Li;
-  }
-
-  if (adc0 < valorDigital[0]) {
-    salinidad = 0.0;
-  }
-
-  return salinidad;
+  Serial.println("Calibración completada. Iniciando lectura...");
 }
 
 void loop() {
-  if (choice == 1) {
-    // Leer el valor crudo del canal A0 para humedad
-    int16_t humedadCrudo = ads.readADC_SingleEnded(0);
+  int16_t humedadCrudo = ads.readADC_SingleEnded(0);
 
-    // Mapear el valor crudo al rango de 0-100 para el porcentaje de humedad
-    int humedadPorcentaje = map(humedadCrudo, humedadCrudoMojado, humedadCrudoSeco, 100, 0);
+  int humedadPorcentaje = map(humedadCrudo, humedadCrudoMojado, humedadCrudoSeco, 100, 0);
+  humedadPorcentaje = constrain(humedadPorcentaje, 0, 100);
 
-    // Limitar el rango a 0-100%
-    humedadPorcentaje = constrain(humedadPorcentaje, 0, 100);
+  Serial.print("Valor crudo del ADC: ");
+  Serial.print(humedadCrudo);
+  Serial.print(" -> Humedad: ");
+  Serial.print(humedadPorcentaje);
+  Serial.println("%");
 
-    // Mostrar los valores en el monitor serie para depuración
-    Serial.print("Valor crudo del ADC (Humedad): ");
-    Serial.print(humedadCrudo);
-    Serial.print(" -> Humedad: ");
-    Serial.print(humedadPorcentaje);
-    Serial.println("%");
-
-    // Lógica para controlar los LEDs
-    if (humedadPorcentaje <= 33) {
-      digitalWrite(ledLow, HIGH);
-      digitalWrite(ledMid, LOW);
-      digitalWrite(ledHigh, LOW);
-    } else if (humedadPorcentaje <= 66) {
-      digitalWrite(ledLow, LOW);
-      digitalWrite(ledMid, HIGH);
-      digitalWrite(ledHigh, LOW);
-    } else {
-      digitalWrite(ledLow, LOW);
-      digitalWrite(ledMid, LOW);
-      digitalWrite(ledHigh, HIGH);
-    }
-
-    // Enviar los datos a la nube
-    enviarDatosNube(humedadPorcentaje, 0.0); // Enviar solo humedad
-  } else if (choice == 2) {
-    // Leer el valor digital del sensor de salinidad
-    int16_t adc0;
-    digitalWrite(power_pin, HIGH);
-    delay(100);
-    adc0 = analogRead(A0);
-    digitalWrite(power_pin, LOW);
-    delay(100);
-
-    Serial.print("Lectura digital = ");
-    Serial.println(adc0, DEC);
-
-    // Convertir a gramos de sal usando el polinomio de Lagrange
-    float salinidad = calcularSalinidad(adc0);
-    Serial.print("Gramos de sal = ");
-    Serial.println(salinidad, 2); 
-
-    // Enviar los datos a la nube
-    enviarDatosNube(0, salinidad); // Enviar solo salinidad
+  if (humedadPorcentaje <= 33) {
+    digitalWrite(ledLow, HIGH);
+    digitalWrite(ledMid, LOW);
+    digitalWrite(ledHigh, LOW);
+  } else if (humedadPorcentaje <= 66) {
+    digitalWrite(ledLow, LOW);
+    digitalWrite(ledMid, HIGH);
+    digitalWrite(ledHigh, LOW);
+  } else {
+    digitalWrite(ledLow, LOW);
+    digitalWrite(ledMid, LOW);
+    digitalWrite(ledHigh, HIGH);
   }
 
-  delay(1000); // Esperar 1 segundo antes de la siguiente lectura
+  int16_t adc0;
+
+  digitalWrite(power_pin, HIGH);
+  delay(100);
+  adc0 = analogRead(A0);
+  digitalWrite(power_pin, LOW);
+  delay(100);
+
+  float salinidad = a * pow(adc0, 4) + b * pow(adc0, 3) + c * pow(adc0, 2) + d * adc0 + e;
+
+  Serial.print("Valor digital de salinidad = ");
+  Serial.println(adc0);
+  Serial.print("Salinidad en gramos = ");
+  Serial.println(salinidad);
+
+  enviarDatosNube(humedadPorcentaje, salinidad);
+
+  delay(1000);
 }
