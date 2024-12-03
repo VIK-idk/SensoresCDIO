@@ -5,8 +5,8 @@
 Adafruit_ADS1115 ads;
 
 // Pines para los LEDs
-const int ledLow = 5;   // LED para 0% - 33% (A1)
-const int ledMid = 0;   // LED para 33% - 66% (A2)
+//const int ledLow = 5;   // LED para 0% - 33% (A1)
+const int ledMid = 0;   // LED para 0% - 50% (A2)
 const int ledHigh = 4;  // LED para 66% - 100% (A3)
 
 // Variables globales para calibración
@@ -74,12 +74,12 @@ void setup() {
   Serial.println("ADS1115 iniciado correctamente.");
 
   // Configurar pines de los LEDs como salida
-  pinMode(ledLow, OUTPUT);
+//  pinMode(ledLow, OUTPUT);
   pinMode(ledMid, OUTPUT);
   pinMode(ledHigh, OUTPUT);
 
   // Asegurarnos de que los LEDs estén apagados al inicio
-  digitalWrite(ledLow, LOW);
+//  digitalWrite(ledLow, LOW);
   digitalWrite(ledMid, LOW);
   digitalWrite(ledHigh, LOW);
 
@@ -128,17 +128,11 @@ void loop() {
   Serial.print(humedadPorcentaje);
   Serial.println("%");
 
-  // Lógica para controlar los LEDs
-  if (humedadPorcentaje <= 33) {
-    digitalWrite(ledLow, HIGH);
-    digitalWrite(ledMid, LOW);
-    digitalWrite(ledHigh, LOW);
-  } else if (humedadPorcentaje <= 66) {
-    digitalWrite(ledLow, LOW);
+  // Control de LEDs según la humedad
+  if (humedadPorcentaje <= 50) {
     digitalWrite(ledMid, HIGH);
     digitalWrite(ledHigh, LOW);
   } else {
-    digitalWrite(ledLow, LOW);
     digitalWrite(ledMid, LOW);
     digitalWrite(ledHigh, HIGH);
   }
